@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+import pytest
 
 def test_followup_workflow(client: TestClient):
     """
@@ -50,9 +51,9 @@ def test_followup_workflow(client: TestClient):
     assert followups[0]["note"] == followup_payload["note"]
 
 
-def test_create_followup_unknown_lead(client: TestClient):
+def test_create_followup_for_unknown_lead(client: TestClient):
     """
-    Tests that creating a follow-up for a non-existent lead fails.
+    NEGATIVE: Tests that creating a follow-up for a non-existent lead fails.
     """
     followup_payload = {
         "lead_id": 99999,  # ID that definitely doesn't exist
@@ -63,4 +64,41 @@ def test_create_followup_unknown_lead(client: TestClient):
     response = client.post("/api/v1/followups/", json=followup_payload)
     
     assert response.status_code == 404
-    assert "not found" in response.json()["detail"].lower()
+    assert "lead with id 99999 not found" in response.json()["detail"].lower()
+
+
+def test_get_followups_for_unknown_lead(client: TestClient):
+    """
+    NEGATIVE: Tests that retrieving follow-ups for a non-existent lead fails.
+    """
+    response = client.get("/api/v1/followups/lead/99999")
+    
+    assert response.status_code == 404
+    assert "lead with id 99999 not found" in response.json()["detail"].lower()
+
+
+def test_create_followup_with_invalid_data(client: TestClient):
+    """
+    NEGATIVE: Tests that creating a follow-up with missing required fields fails.
+    """
+    # Create a valid lead first
+    lead_payload = {"name": "Test Lead", "phone": "+123"}
+    lead_response = client.post("/api/v1/leads/", json=lead_payload)
+    assert lead_response.status_code == 201
+    lead_id = lead_response.json()["id"]
+
+    # Payload is missing the required 'note' field
+    invalid_payload = {
+        "lead_id": lead_id,
+        "status": "pending"
+    }
+    
+    response = client.post("/api/v1/followups/", json=invalid_payload)
+    
+    # FastAPI's Pydantic validation should catch this
+    assert response.status_code == 422  # Unprocessable Entity
+    
+    # Check for a meaningful error message
+    error_details = response.json()["detail"]
+    assert any("note" in e["loc"] for e in error_details)
+    assert any("field required" in e["msg"].lower() for e in error_details)
