@@ -37,20 +37,20 @@ for future analytics and automation.
 
 The application follows a modular and layered architecture:
 
-
-
+```text
 app/
-├── api/v1/ # Versioned API routes
-│ ├── lead.py # Lead endpoints
-│ └── followup.py # Follow-up endpoints
-├── models/ # SQLAlchemy ORM models
-├── schemas/ # Pydantic request/response schemas
-├── services/ # Business logic layer
-├── core/ # Database configuration & settings
-└── main.py # FastAPI application entry point
-tests/ # Automated API tests
-scripts/ # Utility scripts (e.g. DB init)
-ui/ # Lightweight UI (Streamlit prototype)
+├── api/v1/             # Versioned API routes
+│   ├── lead.py         # Lead endpoints
+│   └── followup.py     # Follow-up endpoints
+├── models/             # SQLAlchemy ORM models
+├── schemas/            # Pydantic request/response schemas
+├── services/           # Business logic layer
+├── core/               # Database configuration & settings
+└── main.py             # FastAPI application entry point
+tests/                  # Automated API tests
+scripts/                # Utility scripts (e.g. DB init)
+ui/                     # Lightweight UI (Streamlit prototype)
+```
 
 
 This structure ensures:
