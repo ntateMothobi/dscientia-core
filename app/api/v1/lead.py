@@ -1,9 +1,15 @@
-from fastapi import APIRouter, status, HTTPException
+from fastapi import APIRouter, status, Depends
+from sqlalchemy.orm import Session
 from typing import List
+
+from app.core.database import get_db
 from app.schemas.lead import Lead, LeadCreate
 from app.services import lead_service
 
-router = APIRouter()
+router = APIRouter(
+    prefix="/leads",
+    tags=["Leads"]
+)
 
 @router.post(
     "/", 
@@ -11,23 +17,19 @@ router = APIRouter()
     status_code=status.HTTP_201_CREATED,
     summary="Create a new lead"
 )
-async def create_lead(lead: LeadCreate):
+def create_lead(lead: LeadCreate, db: Session = Depends(get_db)):
     """
     Create a new lead.
-    
-    - **name**: Client name
-    - **phone**: Contact number
-    - **source**: Lead source (whatsapp, instagram, etc.)
     """
-    return lead_service.create_lead(lead)
+    return lead_service.create_lead(db=db, lead_in=lead)
 
 @router.get(
     "/", 
     response_model=List[Lead],
     summary="Get all leads"
 )
-async def get_leads():
+def get_leads(db: Session = Depends(get_db)):
     """
-    Retrieve all leads.
+    Retrieves a list of all leads.
     """
-    return lead_service.get_all_leads()
+    return lead_service.get_all_leads(db=db)

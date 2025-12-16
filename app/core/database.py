@@ -1,13 +1,19 @@
+import os
+from pathlib import Path
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, declarative_base
 
-# For an MVP with SQLite, the database will be a file in the root directory
-SQLALCHEMY_DATABASE_URL = "sqlite:///./prosi_mini.db"
+# --- Absolute Path for Database ---
+# Build a path to the project root directory
+# This makes the database path independent of the current working directory
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+DB_NAME = "prosi_mini.db"
+SQLALCHEMY_DATABASE_URL = f"sqlite:///{PROJECT_ROOT.joinpath(DB_NAME)}"
+
+print(f"Database URL: {SQLALCHEMY_DATABASE_URL}") # For debugging
 
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL, 
-    # connect_args is needed only for SQLite to allow multithreading
     connect_args={"check_same_thread": False}
 )
 
@@ -15,7 +21,6 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
 
-# Dependency to get a DB session
 def get_db():
     db = SessionLocal()
     try:
