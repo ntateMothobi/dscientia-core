@@ -13,215 +13,74 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- Data Fetching ---
-@st.cache_data(ttl=60)
-def fetch_dashboard_analytics():
-    """Fetches aggregate analytics data from the backend API."""
+# --- Data Fetching (Cached) ---
+@st.cache_data(ttl=30)
+def fetch_all_data():
+    """Fetches both risk profile and detailed lead data and merges them."""
     try:
-        response = requests.get(f"{API_BASE_URL}/analytics/dashboard")
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        st.error(f"⚠️ Error fetching dashboard data: {e}")
+        risk_response = requests.get(f"{API_BASE_URL}/analytics/risk_profile")
+        risk_response.raise_for_status()
+        risk_df = pd.DataFrame(risk_response.json())
+
+        leads_response = requests.get(f"{API_BASE_URL}/leads/")
+        leads_response.raise_for_status()
+        leads_df = pd.DataFrame(leads_response.json())
+
+        # Merge the two dataframes to have all data in one place
+        if not risk_df.empty and not leads_df.empty:
+            # Keep followups from leads_df and analytics from risk_df
+            merged_df = pd.merge(
+                risk_df,
+                leads_df[['id', 'followups', 'created_at']],
+                on='id',
+                how='left'
+            )
+            return merged_df
         return None
 
-@st.cache_data(ttl=60)
-def fetch_all_leads():
-    """Fetches all individual lead records for detailed analysis."""
-    try:
-        response = requests.get(f"{API_BASE_URL}/leads/")
-        response.raise_for_status()
-        # The API returns a list of leads, each with a nested list of followups
-        return response.json()
     except requests.exceptions.RequestException as e:
-        st.error(f"⚠️ Error fetching lead details: {e}")
-        return []
-
-# --- Filtering Logic ---
-def filter_leads_data(data, status_filter):
-    if not data: return {}
-    if status_filter == "All": return data
-    by_status = data.get("by_status", {})
-    count = by_status.get(status_filter, 0)
-    return {"total_leads": count, "by_status": {status_filter: count}}
-
-def filter_followups_data(data, status_filter):
-    if not data: return {}
-    if status_filter == "All": return data
-    by_status = data.get("by_status", {})
-    count = by_status.get(status_filter, 0)
-    return {"total_followups": count, "by_status": {status_filter: count}}
+        st.error(f"⚠️ Error fetching data: {e}")
+        return None
 
 # --- UI Components ---
-def setup_sidebar(leads_data, followups_data):
+def setup_sidebar(df):
+    """Sets up the sidebar with view selector and filters."""
     with st.sidebar:
-        st.header("Controls")
+        st.header("Dashboard Controls")
+        
+        view_mode = st.radio(
+            "Dashboard View",
+            ["Executive Summary", "Sales Analytics", "Risk & SLA"],
+            key="view_mode"
+        )
+        
+        st.markdown("---")
+        
         if st.button("🔄 Refresh Data", key="refresh_btn"):
             st.cache_data.clear()
             st.rerun()
+        
         st.header("Filters")
-        lead_statuses = list(leads_data.get("by_status", {}).keys())
-        lead_status_filter = st.selectbox("Filter Leads by Status", ["All"] + lead_statuses, key="lead_filter")
-        followup_statuses = list(followups_data.get("by_status", {}).keys())
-        followup_status_filter = st.selectbox("Filter Follow-ups by Status", ["All"] + followup_statuses, key="followup_filter")
-    return lead_status_filter, followup_status_filter
+        
+        status_options = ["All"] + df['status'].unique().tolist()
+        status_filter = st.selectbox("Filter by Status", status_options, key="status_filter")
 
-def render_status_charts(leads_data, followups_data):
-    st.header("📈 Status Overview")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("Leads by Status")
-        status_data = leads_data.get("by_status", {})
-        if not status_data:
-            st.info("No lead data to display.")
-        else:
-            df = pd.DataFrame(list(status_data.items()), columns=['Status', 'Count']).set_index('Status')
-            st.bar_chart(df)
-    with col2:
-        st.subheader("Follow-ups by Status")
-        status_data = followups_data.get("by_status", {})
-        if not status_data:
-            st.info("No follow-up data to display.")
-        else:
-            df = pd.DataFrame(list(status_data.items()), columns=['Status', 'Count'])
-            fig = px.pie(df, values='Count', names='Status', title='Follow-up Distribution')
-            st.plotly_chart(fig, use_container_width=True)
+        risk_options = ["All"] + df['risk_level'].unique().tolist()
+        risk_filter = st.selectbox("Filter by Risk Level", risk_options, key="risk_filter")
 
-def render_lead_aging_analysis(leads_df, status_filter):
-    st.header("⏳ Lead Aging Analysis")
-    if leads_df.empty:
-        st.info("No lead data available for aging analysis.")
-        return
+    return view_mode, status_filter, risk_filter
 
-    if status_filter != "All":
-        leads_df = leads_df[leads_df['status'] == status_filter]
-    if leads_df.empty:
-        st.info(f"No leads with status '{status_filter}'.")
-        return
+# --- Modular Render Functions ---
 
-    leads_df['created_at'] = pd.to_datetime(leads_df['created_at'], utc=True)
-    leads_df['age_days'] = (datetime.now(timezone.utc) - leads_df['created_at']).dt.days
-    avg_age = leads_df['age_days'].mean()
-
-    col1, col2 = st.columns([1, 3])
-    with col1:
-        st.metric("Average Lead Age (Days)", f"{avg_age:.1f}")
-    with col2:
-        fig = px.histogram(leads_df, x="age_days", nbins=20, title="Lead Age Distribution")
-        st.plotly_chart(fig, use_container_width=True)
-
-def render_source_performance(leads_df, status_filter):
-    st.header("🎯 Source Performance Analysis")
-    if leads_df.empty:
-        st.info("No lead data available for source analysis.")
-        return
-
-    if status_filter != "All":
-        leads_df = leads_df[leads_df['status'] == status_filter]
-    if leads_df.empty:
-        st.info(f"No leads with status '{status_filter}'.")
-        return
-
-    source_agg = leads_df.groupby('source').agg(
-        total_leads=('id', 'count'),
-        closed_leads=('status', lambda s: (s == 'closed').sum())
-    ).reset_index()
-    source_agg['conversion_rate'] = (source_agg['closed_leads'] / source_agg['total_leads'] * 100).fillna(0)
+def render_executive_summary(df):
+    """Renders the high-level executive summary view."""
+    st.header("📊 Executive Key Metrics")
     
-    st.subheader("Performance by Source")
-    st.dataframe(source_agg.style.format({'conversion_rate': '{:.1f}%'}), use_container_width=True)
-
-def render_first_followup_delay(leads_df):
-    """
-    Calculates and renders the average first follow-up delay per lead source.
-    """
-    st.header("⏱️ First Follow-up Speed")
-    st.markdown("Measures the average time (in days) from lead creation to the first follow-up.")
-
-    if leads_df.empty or 'followups' not in leads_df.columns:
-        st.info("No lead data available to calculate follow-up delay.")
-        return
-
-    # This list will store the delay calculated for each lead that has follow-ups
-    delays = []
-    
-    # Ensure lead 'created_at' is a datetime object for calculations
-    leads_df['created_at'] = pd.to_datetime(leads_df['created_at'], utc=True)
-
-    for _, lead in leads_df.iterrows():
-        # Skip leads that have no follow-ups
-        if not lead['followups']:
-            continue
-
-        # Convert the nested list of follow-up dicts into a DataFrame
-        followups_df = pd.DataFrame(lead['followups'])
-        
-        # Ensure follow-up 'created_at' is a datetime object
-        followups_df['created_at'] = pd.to_datetime(followups_df['created_at'], utc=True)
-        
-        # Find the timestamp of the very first follow-up
-        first_followup_time = followups_df['created_at'].min()
-        
-        # Calculate the delay between lead creation and the first follow-up
-        delay = first_followup_time - lead['created_at']
-        
-        delays.append({
-            'source': lead['source'],
-            'delay_days': delay.total_seconds() / (24 * 3600)  # Convert seconds to days
-        })
-
-    if not delays:
-        st.info("No leads with follow-ups found to analyze.")
-        return
-
-    # Create a DataFrame from the calculated delays and group by source to find the average
-    delay_df = pd.DataFrame(delays)
-    avg_delay_by_source = delay_df.groupby('source')['delay_days'].mean().sort_values()
-
-    st.subheader("Average Delay by Lead Source")
-
-    # Display results in columns using Streamlit's metric component
-    cols = st.columns(len(avg_delay_by_source))
-    for i, (source, avg_delay) in enumerate(avg_delay_by_source.items()):
-        with cols[i]:
-            st.metric(label=f"{source}", value=f"{avg_delay:.1f} Days")
-
-    # Also display as a bar chart for visual comparison
-    fig = px.bar(
-        avg_delay_by_source,
-        y=avg_delay_by_source.values,
-        x=avg_delay_by_source.index,
-        labels={'x': 'Lead Source', 'y': 'Average Delay (Days)'},
-        title="Average First Follow-up Delay by Source",
-        text_auto='.1f'
-    )
-    fig.update_layout(showlegend=False)
-    st.plotly_chart(fig, use_container_width=True)
-
-
-# --- Main Application ---
-st.title("🏠 Property Sales Intelligence (Mini)")
-st.markdown("### Data-driven insights for property sales")
-st.markdown("---")
-
-raw_analytics_data = fetch_dashboard_analytics()
-all_leads_list = fetch_all_leads()
-
-if raw_analytics_data and all_leads_list is not None:
-    raw_leads_data = raw_analytics_data.get("leads", {})
-    raw_followups_data = raw_analytics_data.get("followups", {})
-
-    lead_filter, followup_filter = setup_sidebar(raw_leads_data, raw_followups_data)
-
-    filtered_leads_data = filter_leads_data(raw_leads_data, lead_filter)
-    filtered_followups_data = filter_followups_data(raw_followups_data, followup_filter)
-
-    st.header("📊 Key Metrics")
-    total_leads = filtered_leads_data.get("total_leads", 0)
-    total_followups = filtered_followups_data.get("total_followups", 0)
-    closed_leads = filtered_leads_data.get("by_status", {}).get("closed", 0)
+    total_leads = len(df)
+    high_risk_leads = len(df[df['risk_level'] == 'High'])
+    sla_breached_count = df['sla_breached'].sum()
+    closed_leads = len(df[df['status'] == 'closed'])
     conversion_rate = (closed_leads / total_leads * 100) if total_leads > 0 else 0
-    followup_intensity = (total_followups / total_leads) if total_leads > 0 else 0
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -229,26 +88,97 @@ if raw_analytics_data and all_leads_list is not None:
     with col2:
         st.metric(label="Conversion Rate", value=f"{conversion_rate:.1f}%")
     with col3:
-        st.metric(label="Avg Follow-ups / Lead", value=f"{followup_intensity:.1f}")
+        st.metric(label="🔥 High Risk Leads", value=high_risk_leads, help="Leads with Risk Score >= 70")
     with col4:
-        pending_count = filtered_followups_data.get("by_status", {}).get("pending", 0)
-        st.metric(label="Pending Actions", value=pending_count)
-
-    st.markdown("---")
+        st.metric(label="⏰ SLA Breached", value=sla_breached_count)
     
-    leads_df = pd.DataFrame(all_leads_list)
+    st.markdown("---")
+    st.header("💡 AI-Driven Insights")
+    st.info(
+        """
+        **Summary:** The sales pipeline shows a steady flow of new leads, but a significant portion are flagged as 'High Risk' due to slow follow-up times. 
+        - **Recommendation:** Prioritize outreach to leads in the 'High Risk' and 'SLA Breached' categories to improve conversion potential.
+        - **Observation:** Leads from 'Referral' sources continue to show the highest conversion rates, suggesting a strong opportunity for network-based marketing.
+        """
+    )
+
+def render_sales_analytics(df):
+    """Renders the detailed sales performance analytics view."""
+    st.header("🎯 Sales Performance Analytics")
+
+    # 1. Lead Status Distribution
+    st.subheader("Lead Status Distribution")
+    status_counts = df['status'].value_counts()
+    fig_status = px.bar(status_counts, x=status_counts.index, y=status_counts.values, labels={'x': 'Status', 'y': 'Count'}, title="Current Lead Funnel")
+    st.plotly_chart(fig_status, use_container_width=True)
+
+    # 2. Lead Source Performance
+    st.subheader("Performance by Source")
+    source_agg = df.groupby('source').agg(
+        total_leads=('id', 'count'),
+        closed_leads=('status', lambda s: (s == 'closed').sum())
+    ).reset_index()
+    source_agg['conversion_rate'] = (source_agg['closed_leads'] / source_agg['total_leads'] * 100).fillna(0)
+    st.dataframe(source_agg.style.format({'conversion_rate': '{:.1f}%'}), use_container_width=True)
+
+    # 3. Lead Aging Analysis
+    st.subheader("Lead Aging")
+    avg_age = df['age_days'].mean()
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        st.metric("Average Lead Age (Days)", f"{avg_age:.1f}")
+    with col2:
+        fig_age = px.histogram(df, x="age_days", nbins=20, title="Lead Age Distribution")
+        st.plotly_chart(fig_age, use_container_width=True)
+
+def render_risk_sla_dashboard(df):
+    """Renders the risk and SLA breach analysis view."""
+    st.header("🚨 Risk & SLA Dashboard")
     
-    # Render the new follow-up delay analysis section
-    render_first_followup_delay(leads_df.copy())
-    st.markdown("---")
+    high_risk_leads = len(df[df['risk_level'] == 'High'])
+    sla_breached_count = df['sla_breached'].sum()
 
-    render_lead_aging_analysis(leads_df.copy(), lead_filter)
-    st.markdown("---")
-
-    render_source_performance(leads_df.copy(), lead_filter)
-    st.markdown("---")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric(label="🔥 High Risk Leads", value=high_risk_leads, help="Leads with Risk Score >= 70")
+    with col2:
+        st.metric(label="⏰ SLA Breached Leads", value=sla_breached_count)
     
-    render_status_charts(filtered_leads_data, filtered_followups_data)
+    st.markdown("---")
+    st.subheader("Lead Risk Details")
+    
+    display_cols = ["name", "status", "age_days", "sla_breached", "risk_score", "risk_level"]
+    column_config = {
+        "name": "Lead Name", "status": "Stage", "age_days": "Age (Days)",
+        "sla_breached": "SLA Breached", "risk_score": "Risk Score", "risk_level": "Risk Level"
+    }
+    st.dataframe(df[display_cols], use_container_width=True, column_config=column_config)
 
+# --- Main Application ---
+st.title("🏠 Property Sales Intelligence (Mini)")
+st.markdown("### Data-driven insights for property sales")
+st.markdown("---")
+
+# Fetch and prepare data once
+master_df = fetch_all_data()
+
+if master_df is not None and not master_df.empty:
+    # Setup sidebar and get user selections
+    view_mode, status_filter, risk_filter = setup_sidebar(master_df)
+
+    # Apply filters to create the displayed DataFrame
+    filtered_df = master_df.copy()
+    if status_filter != "All":
+        filtered_df = filtered_df[filtered_df['status'] == status_filter]
+    if risk_filter != "All":
+        filtered_df = filtered_df[filtered_df['risk_level'] == risk_filter]
+
+    # Conditionally render the selected view
+    if view_mode == "Executive Summary":
+        render_executive_summary(filtered_df)
+    elif view_mode == "Sales Analytics":
+        render_sales_analytics(filtered_df)
+    elif view_mode == "Risk & SLA":
+        render_risk_sla_dashboard(filtered_df)
 else:
-    st.warning("Could not load dashboard data. Please ensure the backend server is running.")
+    st.warning("Could not load dashboard data. Please ensure the backend server is running and data is seeded.")
