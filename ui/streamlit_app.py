@@ -2,7 +2,6 @@ import streamlit as st
 import requests
 import pandas as pd
 import plotly.express as px
-from datetime import datetime, timezone
 
 # --- Configuration ---
 API_BASE_URL = "http://127.0.0.1:8000/api/v1"
@@ -13,227 +12,134 @@ st.set_page_config(
     layout="wide"
 )
 
+# --- State Initialization ---
+if 'persona' not in st.session_state:
+    st.session_state.persona = 'Founder / Executive'
+
 # --- Data Fetching (Cached) ---
 @st.cache_data(ttl=30)
 def fetch_all_data():
-    """Fetches both risk profile and detailed lead data and merges them."""
+    """Fetches lead and risk profile data."""
     try:
         risk_response = requests.get(f"{API_BASE_URL}/analytics/risk_profile")
         risk_response.raise_for_status()
-        risk_df = pd.DataFrame(risk_response.json())
-
-        leads_response = requests.get(f"{API_BASE_URL}/leads/")
-        leads_response.raise_for_status()
-        leads_df = pd.DataFrame(leads_response.json())
-
-        # Merge the two dataframes to have all data in one place
-        if not risk_df.empty and not leads_df.empty:
-            merged_df = pd.merge(
-                risk_df,
-                leads_df[['id', 'followups', 'created_at']],
-                on='id',
-                how='left'
-            )
-            return merged_df
-        return None
-
+        return pd.DataFrame(risk_response.json())
     except requests.exceptions.RequestException as e:
-        st.error(f"⚠️ Error fetching data: {e}")
+        st.error(f"⚠️ Error fetching dashboard data: {e}")
         return None
+
+@st.cache_data(ttl=30)
+def fetch_persona_insight(persona: str) -> str:
+    """Fetches formatted insights for a specific persona."""
+    persona_map = {
+        "Founder / Executive": "founder",
+        "Sales Manager": "sales",
+        "Operations / CRM Manager": "ops"
+    }
+    api_persona = persona_map.get(persona, "founder")
+    try:
+        response = requests.get(f"{API_BASE_URL}/analytics/persona_insights?persona={api_persona}")
+        response.raise_for_status()
+        return response.text
+    except requests.exceptions.RequestException as e:
+        return f"⚠️ Error fetching insights: {e}"
+
+@st.cache_data(ttl=30)
+def fetch_alerts(persona: str) -> list:
+    """Fetches proactive alerts for a specific persona."""
+    persona_map = {
+        "Founder / Executive": "founder",
+        "Sales Manager": "sales",
+        "Operations / CRM Manager": "ops"
+    }
+    api_persona = persona_map.get(persona, "sales")
+    try:
+        response = requests.get(f"{API_BASE_URL}/analytics/alerts?persona={api_persona}")
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException:
+        return []
 
 # --- UI Components ---
+def render_alerts_panel(persona: str):
+    """Renders the alerts and notifications panel in the sidebar."""
+    alerts = fetch_alerts(persona)
+    if not alerts:
+        return
+
+    with st.sidebar:
+        with st.expander("🚨 Alerts & Notifications", expanded=True):
+            for alert in sorted(alerts, key=lambda x: x['severity'], reverse=True):
+                icon = alert.get('icon', '⚠️')
+                st.markdown(f"**{icon} {alert['title']}**")
+                st.caption(alert['message'])
+                if 'action_hint' in alert:
+                    st.markdown(f"<small>_Action: {alert['action_hint']}_</small>", unsafe_allow_html=True)
+                st.markdown("---")
+
 def setup_sidebar(df):
-    """Sets up the sidebar with view selector and filters."""
+    """Sets up the sidebar with controls and filters."""
     with st.sidebar:
         st.header("Dashboard Controls")
-        
-        view_mode = st.radio(
-            "Dashboard View",
-            ["Executive Summary", "Sales Analytics", "Risk & SLA"],
-            key="view_mode"
-        )
+        persona_options = ["Founder / Executive", "Sales Manager", "Operations / CRM Manager"]
+        st.session_state.persona = st.radio("View as", persona_options, key="persona_selector")
         
         st.markdown("---")
-        
-        if st.button("🔄 Refresh Data", key="refresh_btn"):
+        if st.button("🔄 Refresh Data"):
             st.cache_data.clear()
             st.rerun()
-        
+    
+    render_alerts_panel(st.session_state.persona) # Render alerts after persona is set
+
+    with st.sidebar:
         st.header("Filters")
-        
         status_options = ["All"] + df['status'].unique().tolist()
-        status_filter = st.selectbox("Filter by Status", status_options, key="status_filter")
+        status_filter = st.selectbox("Filter by Status", status_options)
 
         risk_options = ["All"] + df['risk_level'].unique().tolist()
-        risk_filter = st.selectbox("Filter by Risk Level", risk_options, key="risk_filter")
+        risk_filter = st.selectbox("Filter by Risk Level", risk_options)
 
-    return view_mode, status_filter, risk_filter
+    return status_filter, risk_filter
 
-# --- Modular Render Functions ---
-
-def render_executive_summary(df):
+def render_executive_summary(df, persona):
     """Renders the high-level executive summary view."""
     st.header("Executive Snapshot")
-    st.caption("A high-level overview of sales pipeline health and key operational metrics.")
-
+    
     total_leads = len(df)
     high_risk_leads = len(df[df['risk_level'] == 'High'])
     sla_breached_count = df['sla_breached'].sum()
-    closed_leads = len(df[df['status'] == 'closed'])
-    conversion_rate = (closed_leads / total_leads * 100) if total_leads > 0 else 0
-
-    # --- Confidence Logic ---
-    if total_leads >= 50:
-        confidence_level = "High"
-        insight_nature = "Robust"
-    elif total_leads >= 15:
-        confidence_level = "Medium"
-        insight_nature = "Directional"
-    else:
-        confidence_level = "Low"
-        insight_nature = "Highly Directional"
-
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric(
-            label="Total Active Leads",
-            value=total_leads,
-            help="The total number of leads in the pipeline that are not yet 'closed' or 'lost'."
-        )
-    with col2:
-        st.metric(
-            label="Conversion Rate",
-            value=f"{conversion_rate:.1f}%",
-            help="The percentage of total leads that have been successfully moved to the 'closed' status."
-        )
-    with col3:
-        st.metric(
-            label="High-Risk Leads",
-            value=high_risk_leads,
-            help="Leads with a risk score of 70 or higher, indicating they may be stalled or require urgent attention."
-        )
-    with col4:
-        st.metric(
-            label="SLA Breaches",
-            value=sla_breached_count,
-            help="The number of leads that have exceeded the standard follow-up time for their current stage."
-        )
-
-    st.caption("These metrics are designed for at-a-glance awareness. Use the 'Risk & SLA' view for detailed analysis.")
     
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total Active Leads", total_leads)
+    col2.metric("High-Risk Leads", high_risk_leads)
+    col3.metric("SLA Breaches", sla_breached_count)
+
     st.markdown("---")
-    st.subheader("Executive Insights")
     
-    # Strict format implementation
-    st.info(f"""
-    **Executive Summary**
-    The pipeline shows active engagement, but a high volume of SLA breaches suggests operational bottlenecks. Due to the current sample size ({total_leads} leads), these insights are **{insight_nature}**.
-
-    **Key Signals**
-    *   **Referral Efficiency:** Referral leads are currently showing higher conversion potential than other sources.
-    *   **Response Lag:** Social media leads (Instagram/Facebook) exhibit longer response times, correlating with higher risk scores.
-    *   **Risk Volume:** A significant proportion of the pipeline is flagged as 'High Risk' due to stalled follow-ups.
-
-    **Risks & Watchouts**
-    *   **Operational Risk:** Delayed follow-ups are the primary driver of the current risk profile.
-    *   **Data Limitation:** Trends should be validated as volume increases beyond 50 leads.
-
-    **Recommendations**
-    *   Prioritize 'High Risk' leads for immediate follow-up today.
-    *   Review notification settings for social media channels to improve response speed.
-
-    **Confidence & Notes**
-    *   **Confidence Level:** {confidence_level}
-    *   **Sample Size:** {total_leads} Leads
-    *   **Time Window:** Last ~21 Days
-    *   *Disclaimer: These insights are based on limited data and should be used as signals rather than definitive conclusions.*
-    """)
-
-def render_sales_analytics(df):
-    """Renders the detailed sales performance analytics view."""
-    st.header("Performance Breakdown")
-    st.caption("Analyze lead sources, conversion funnels, and aging to identify performance trends.")
-
-    # 1. Lead Status Distribution
-    st.subheader("Lead Funnel Distribution")
-    status_counts = df['status'].value_counts()
-    fig_status = px.bar(status_counts, x=status_counts.index, y=status_counts.values, labels={'x': 'Status', 'y': 'Number of Leads'}, title="Current Leads by Stage")
-    st.plotly_chart(fig_status, use_container_width=True)
-
-    # 2. Lead Source Performance
-    st.subheader("Lead Source Performance")
-    source_agg = df.groupby('source').agg(
-        total_leads=('id', 'count'),
-        closed_leads=('status', lambda s: (s == 'closed').sum())
-    ).reset_index()
-    source_agg['conversion_rate'] = (source_agg['closed_leads'] / source_agg['total_leads'] * 100).fillna(0)
-    st.dataframe(source_agg.style.format({'conversion_rate': '{:.1f}%'}), use_container_width=True)
-
-    # 3. Lead Aging Analysis
-    st.subheader("Lead Aging Analysis")
-    avg_age = df['age_days'].mean()
-    col1, col2 = st.columns([1, 3])
-    with col1:
-        st.metric("Average Lead Age (Days)", f"{avg_age:.1f}")
-    with col2:
-        fig_age = px.histogram(df, x="age_days", nbins=20, title="Lead Age Distribution")
-        st.plotly_chart(fig_age, use_container_width=True)
+    st.subheader(f"Insights for: {persona}")
+    insight_text = fetch_persona_insight(persona)
+    st.info(insight_text)
 
 def render_risk_sla_dashboard(df):
     """Renders the risk and SLA breach analysis view."""
-    st.header("Risk & SLA Alerts")
-    st.caption("Identify and explore high-risk leads and those that have breached their Service Level Agreement (SLA).")
-    
-    high_risk_leads = len(df[df['risk_level'] == 'High'])
-    sla_breached_count = df['sla_breached'].sum()
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric(label="High Risk Leads", value=high_risk_leads, help="Leads with a risk score of 70 or higher.")
-    with col2:
-        st.metric(label="SLA Breached Leads", value=sla_breached_count)
-    
-    st.markdown("---")
-    st.subheader("Detailed Lead Exploration")
-    
-    display_cols = ["name", "status", "age_days", "sla_breached", "risk_score", "risk_level"]
-    column_config = {
-        "name": "Lead Name", "status": "Stage", "age_days": "Age (Days)",
-        "sla_breached": "SLA Breached", "risk_score": "Risk Score", "risk_level": "Risk Level"
-    }
-    st.dataframe(df[display_cols], use_container_width=True, column_config=column_config)
+    st.header("Risk & SLA Analysis")
+    st.dataframe(df[["name", "status", "age_days", "risk_score", "risk_level", "sla_breached"]], use_container_width=True)
 
 # --- Main Application ---
 st.title("🏠 Property Sales Intelligence")
-st.caption("An internal decision-support tool for sales agents to monitor lead health and prioritize follow-ups.")
 
-st.info("""
-**Operational Focus:** Monitor lead health → Identify at-risk leads → Take action.
-This dashboard highlights stalled leads and SLA breaches to help you prioritize your daily work.
-""")
-
-st.markdown("---")
-
-# Fetch and prepare data once
 master_df = fetch_all_data()
 
 if master_df is not None and not master_df.empty:
-    # Setup sidebar and get user selections
-    view_mode, status_filter, risk_filter = setup_sidebar(master_df)
+    status_filter, risk_filter = setup_sidebar(master_df)
 
-    # Apply filters to create the displayed DataFrame
     filtered_df = master_df.copy()
     if status_filter != "All":
         filtered_df = filtered_df[filtered_df['status'] == status_filter]
     if risk_filter != "All":
         filtered_df = filtered_df[filtered_df['risk_level'] == risk_filter]
 
-    # Conditionally render the selected view
-    if view_mode == "Executive Summary":
-        render_executive_summary(filtered_df)
-    elif view_mode == "Sales Analytics":
-        render_sales_analytics(filtered_df)
-    elif view_mode == "Risk & SLA":
-        render_risk_sla_dashboard(filtered_df)
+    render_executive_summary(filtered_df, st.session_state.persona)
+    render_risk_sla_dashboard(filtered_df)
 else:
-    st.warning("Could not load dashboard data. Please ensure the backend server is running and data is seeded.")
+    st.warning("Could not load dashboard data. Ensure the backend is running.")

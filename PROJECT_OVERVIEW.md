@@ -85,6 +85,7 @@ The MVP will focus on **exactly five core features**:
 5. **Sales Performance Dashboard**
 
    * Visualize total listings, leads, follow-ups, and closed deals
+   * New endpoint `/analytics/persona_insights` provides tailored insights for different user personas (Founder, Sales Manager, Operations Manager).
 
 ---
 
