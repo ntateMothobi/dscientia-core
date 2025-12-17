@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import List, Dict, Optional
 from sqlalchemy.orm import Session, sessionmaker
 import logging
 from datetime import datetime, timezone
@@ -24,13 +24,15 @@ class IngestionRegistry:
     def __init__(self):
         self._sources = discover_sources()
         self.enabled_sources = set(self._sources.keys())
+        self.last_summary: Optional[Dict] = None # The registry now owns its summary
 
     def get_available_sources(self) -> List[str]:
         return list(self._sources.keys())
 
     def ingest_all(self) -> Dict:
         """
-        Runs the ingestion pipeline and returns a detailed summary report.
+        Runs the ingestion pipeline, returns a detailed summary report,
+        and stores it internally.
         """
         run_timestamp = datetime.now(timezone.utc)
         overall_summary = {
@@ -41,7 +43,6 @@ class IngestionRegistry:
         for source_name in self.enabled_sources:
             source_instance = self._sources[source_name]
             source_summary = {"inserted": 0, "updated": 0, "skipped": 0, "failed": 0, "status": "pending"}
-            
             db: Session = SessionLocal()
             try:
                 normalized_leads = source_instance.run()
@@ -75,6 +76,9 @@ class IngestionRegistry:
                 db.close()
             
             overall_summary["sources"][source_name] = source_summary
+        
+        # Store the summary for the health service
+        self.last_summary = overall_summary
         
         return overall_summary
 
