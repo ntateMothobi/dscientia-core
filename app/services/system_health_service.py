@@ -1,101 +1,59 @@
-from datetime import datetime, timedelta, timezone
-from typing import Dict, Any, Optional
-from sqlalchemy.orm import Session
 import time
+from datetime import datetime, timezone
+from typing import Dict, Any
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import OperationalError
 
-from app.models.lead import Lead
-from app.models.followup import Followup
+from app.core.database import engine
+from app.core import cache
+from app.ingestion.registry import registry
 
+# In-memory store for simple observability
 _system_start_time = time.time()
 
-def get_system_health(db: Session, last_ingestion_summary: Optional[Dict]) -> Dict[str, Any]:
-    """
-    Determines the overall system health based on DB status and ingestion results.
-    """
-    uptime_seconds = int(time.time() - _system_start_time)
-    
+def check_database_status(db: Session) -> str:
+    """Checks if the database is connected and responsive."""
     try:
-        db.query(Lead).first()
+        # Perform a simple, fast query
+        db.execute("SELECT 1")
+        return "connected"
+    except OperationalError:
+        return "unreachable"
     except Exception:
-        return {
-            "status": "unhealthy",
-            "reason": "Database connection failed.",
-            "uptime_seconds": uptime_seconds,
-            "api_version": "0.3.0",
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
+        return "degraded"
 
-    if last_ingestion_summary:
-        last_run_dt = datetime.fromisoformat(last_ingestion_summary.get("run_at", ""))
-        if (datetime.now(timezone.utc) - last_run_dt) > timedelta(days=1):
-            return {
-                "status": "degraded",
-                "reason": "Data is stale (no successful ingestion in over 24 hours).",
-                "uptime_seconds": uptime_seconds,
-                "api_version": "0.3.0",
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
-        
-        for source, results in last_ingestion_summary.get("sources", {}).items():
-            if results.get("status") == "failure":
-                return {
-                    "status": "degraded",
-                    "reason": f"Source '{source}' failed during the last ingestion.",
-                    "uptime_seconds": uptime_seconds,
-                    "api_version": "0.3.0",
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }
-
-    return {
-        "status": "healthy",
-        "reason": "All systems operational.",
-        "uptime_seconds": uptime_seconds,
-        "api_version": "0.3.0",
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }
-
-def get_system_metrics(db: Session, last_ingestion_summary: Optional[Dict]) -> Dict[str, Any]:
-    """
-    Gathers key operational metrics.
-    """
-    leads_count = db.query(Lead).count()
-    followups_count = db.query(Followup).count()
+def check_ingestion_services_status() -> Dict[str, str]:
+    """Checks the status of all discovered ingestion sources."""
+    available_sources = registry.get_available_sources()
+    if not available_sources:
+        return {"status": "degraded", "reason": "No ingestion sources discovered."}
     
-    failed_ingestions = 0
-    if last_ingestion_summary:
-        for results in last_ingestion_summary.get("sources", {}).values():
-            if results.get("status") == "failure":
-                failed_ingestions += 1
+    return {source: "ok" for source in available_sources}
 
-    return {
-        "leads_count": leads_count,
-        "followups_count": followups_count,
-        "last_ingestion_at": last_ingestion_summary.get("run_at") if last_ingestion_summary else None,
-        "failed_ingestions_last_24h": failed_ingestions,
-        "avg_ingestion_duration_sec": 5 # Mocked value
-    }
-
-def get_ingestion_status(last_ingestion_summary: Optional[Dict]) -> Dict[str, Any]:
+def get_full_system_health(db: Session) -> Dict[str, Any]:
     """
-    Returns the summary of the last ingestion run.
+    Aggregates health checks from all system components into a single report.
     """
-    if not last_ingestion_summary:
-        return {
-            "last_run": None,
-            "overall_status": "not_run_yet",
-            "sources": {}
-        }
+    db_status = check_database_status(db)
+    ingestion_status = check_ingestion_services_status()
     
-    statuses = [results.get("status") for results in last_ingestion_summary.get("sources", {}).values()]
-    if "failure" in statuses:
-        overall = "failed"
-    elif any(s == "partial" for s in statuses):
-        overall = "partial"
-    else:
-        overall = "success"
+    # Determine overall health
+    overall_status = "healthy"
+    if db_status != "connected":
+        overall_status = "unhealthy"
+    elif "degraded" in ingestion_status.values():
+        overall_status = "degraded"
+
+    # Get last ingestion timestamp from the registry
+    last_ingestion_ts = None
+    if registry.last_summary and "run_at" in registry.last_summary:
+        last_ingestion_ts = registry.last_summary["run_at"]
 
     return {
-        "last_run": last_ingestion_summary.get("run_at"),
-        "overall_status": overall,
-        "sources": last_ingestion_summary.get("sources", {})
+        "status": overall_status,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "database": db_status,
+        "cache": "active" if cache._cache else "inactive",
+        "ingestion_services": ingestion_status,
+        "last_ingestion": last_ingestion_ts
     }
