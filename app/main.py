@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request, Depends
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import HTTPException
 from sqlalchemy.orm import Session
+from contextlib import asynccontextmanager
 
 from app.api.v1 import lead, followup, listing, analytics, governance, ingestion, system, health, alerts, auth, decisions, simulation
 from app.core.database import engine, Base, get_db
@@ -9,13 +10,26 @@ from app.services.audit_log_service import create_audit_log_entry
 from app.schemas.audit_log import AuditLogCreate
 from app.core.security import get_current_user, UserContext
 from app.api.v1.decisions import router as decision_router
+from app.services.decision_sla_service import evaluate_decision_sla
 
 Base.metadata.create_all(bind=engine)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup logic
+    db = next(get_db())
+    try:
+        evaluate_decision_sla(db)
+    finally:
+        db.close()
+    yield
+    # Shutdown logic can go here
 
 app = FastAPI(
     title="ProSi-mini API",
     description="A mini Property Sales Intelligence system.",
-    version="0.3.0"
+    version="0.3.0",
+    lifespan=lifespan
 )
 
 @app.exception_handler(HTTPException)

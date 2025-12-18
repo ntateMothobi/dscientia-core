@@ -5,6 +5,7 @@ from app.schemas.decision_proposal import DecisionProposalCreate, DecisionPropos
 from app.schemas.decision_review import DecisionReview
 from app.services.decision_service import create_decision_proposal
 from app.services.decision_review_service import review_decision
+from app.services.decision_sla_service import evaluate_decision_sla
 
 router = APIRouter(prefix="/decisions", tags=["Decisions"])
 
@@ -19,3 +20,8 @@ def review_decision_api(
     db: Session = Depends(get_db)
 ):
     return review_decision(db, proposal_id, payload)
+
+@router.post("/sla/evaluate")
+def evaluate_sla_endpoint(db: Session = Depends(get_db)):
+    count = evaluate_decision_sla(db)
+    return {"escalated": count}
