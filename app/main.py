@@ -8,6 +8,7 @@ from app.core.database import engine, Base, get_db
 from app.services.audit_log_service import create_audit_log_entry
 from app.schemas.audit_log import AuditLogCreate
 from app.core.security import get_current_user, UserContext
+from app.api.v1.decisions import router as decision_router
 
 Base.metadata.create_all(bind=engine)
 
@@ -50,6 +51,7 @@ app.include_router(ingestion.router, prefix="/api/v1")
 app.include_router(system.router, prefix="/api/v1")
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(alerts.router, prefix="/api/v1")
+app.include_router(decision_router, prefix="/api/v1")
 
 @app.get("/", tags=["Root"])
 def read_root():
