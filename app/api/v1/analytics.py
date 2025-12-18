@@ -4,16 +4,47 @@ from typing import List, Dict, Any
 
 from app.core.database import get_db
 from app.schemas.lead import LeadAnalytics
+from app.schemas.audit_log import AuditLogCreate
 from app.services.lead_service import get_leads_with_analytics, get_all_leads
 from app.services.persona_insight_service import generate_all_persona_insights
 from app.services.trust_service import calculate_data_freshness
 from app.services.data_quality_service import analyze_data_quality
 from app.services.insight_quality_service import calculate_insight_quality
+from app.services.confidence_service import calculate_system_confidence
+from app.services.audit_log_service import create_audit_log_entry
+from app.core.security import get_current_user_role, UserRole
 
 router = APIRouter(
     prefix="/analytics",
     tags=["Analytics"]
 )
+
+@router.get("/confidence", response_model=Dict[str, Any])
+def get_system_confidence(
+    db: Session = Depends(get_db),
+    role: UserRole = Depends(get_current_user_role)
+):
+    """
+    Calculates and returns the system's overall confidence score.
+    This score reflects the trustworthiness of the data and insights.
+    """
+    confidence_data = calculate_system_confidence(db)
+    
+    # Audit the confidence calculation event
+    log_details = (
+        f"Score: {confidence_data['confidence_score']}. "
+        f"Metrics: {confidence_data['metrics']}"
+    )
+    
+    log_entry = AuditLogCreate(
+        event_type="confidence_evaluated",
+        decision=confidence_data['confidence_level'],
+        details=log_details,
+        persona=role.value if role else "anonymous"
+    )
+    create_audit_log_entry(db, log_entry)
+    
+    return confidence_data
 
 @router.get("/risk_profile", response_model=List[LeadAnalytics])
 def get_lead_risk_profile(db: Session = Depends(get_db)):

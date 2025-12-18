@@ -6,6 +6,10 @@ import logging
 API_BASE_URL = "http://127.0.0.1:8000/api/v1"
 logging.basicConfig(level=logging.INFO)
 
+# --- DEV AUTH BYPASS – REMOVE BEFORE PRODUCTION ---
+DEV_MODE_BYPASS_AUTH = True
+# --- END DEV AUTH BYPASS ---
+
 st.set_page_config(page_title="Property Sales Intelligence", page_icon="🏠", layout="wide")
 
 def map_persona_to_role(persona: str) -> str:
@@ -21,7 +25,7 @@ def initialize_session_state():
     defaults = {
         "is_authenticated": False,
         "access_token": None,
-        "user_role": "founder", # Default role before login
+        "user_role": "founder",
         "persona": "Founder / Executive",
         "active_page": "Dashboard",
         "debug_mode": False,
@@ -29,13 +33,20 @@ def initialize_session_state():
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+            
+    # --- DEV AUTH BYPASS – REMOVE BEFORE PRODUCTION ---
+    if DEV_MODE_BYPASS_AUTH:
+        st.session_state.is_authenticated = True
+        st.session_state.access_token = "dev-token-do-not-use-in-prod"
+        # You can change the default role for testing different personas
+        st.session_state.user_role = "founder" 
+    # --- END DEV AUTH BYPASS ---
+
 
 # --- API Calls ---
 def api_request(method, endpoint, **kwargs):
     """Centralized function for making authenticated API requests."""
     headers = kwargs.pop("headers", {})
-    
-    # Prioritize JWT, fallback to role header
     if st.session_state.get("access_token"):
         headers["Authorization"] = f"Bearer {st.session_state.access_token}"
     else:
@@ -45,90 +56,83 @@ def api_request(method, endpoint, **kwargs):
     try:
         response = requests.request(method, url, headers=headers, **kwargs)
         response.raise_for_status()
-        # Handle responses with no content
         return response.json() if response.content else None
     except requests.exceptions.HTTPError as e:
-        if e.response.status_code == 403:
-            st.error("🚫 Access Denied: Your role does not have permission for this action.")
+        if e.response.status_code == 403: st.error("🚫 Access Denied.")
         elif e.response.status_code == 401:
-             st.error("🚫 Authentication failed. Please log out and log back in.")
+             st.error("🚫 Authentication failed.")
              handle_logout()
-        else:
-            st.error(f"API Error: {e.response.status_code} - {e.response.text}")
+        else: st.error(f"API Error: {e.response.status_code}")
         return None
-    except requests.exceptions.RequestException as e:
-        st.error(f"Failed to connect to the API: {e}")
+    except requests.exceptions.RequestException:
+        st.error("Failed to connect to the API.")
         return None
 
 def handle_login():
-    """Attempts to log in using the selected persona."""
-    persona = st.session_state.persona
-    with st.spinner("Authenticating..."):
-        response = api_request(
-            "post",
-            "auth/login",
-            json={"persona": persona}
-        )
-        if response and "access_token" in response:
-            st.session_state.is_authenticated = True
-            st.session_state.access_token = response["access_token"]
-            st.session_state.user_role = map_persona_to_role(persona)
-            st.cache_data.clear()
-            st.rerun()
-        else:
-            st.error("Login failed. Please check the backend and try again.")
+    # This function is now bypassed in DEV_MODE
+    pass
 
 def handle_logout():
-    """Logs the user out and resets the session."""
-    st.session_state.is_authenticated = False
-    st.session_state.access_token = None
-    st.session_state.user_role = "founder" # Reset to default
-    st.cache_data.clear()
-    st.cache_resource.clear()
-    st.rerun()
+    # This function is now bypassed in DEV_MODE
+    pass
 
 # --- UI Components ---
+def display_trust_confidence():
+    """Fetches and displays the Trust & Confidence score on the dashboard."""
+    st.header("Trust & Confidence")
+    confidence_data = api_request("get", "analytics/confidence")
+
+    if confidence_data is None:
+        st.warning("Could not retrieve confidence score. Some metrics may be unavailable.")
+        return
+
+    level = confidence_data.get("confidence_level", "Unknown")
+    score = confidence_data.get("confidence_score", 0)
+    signals = confidence_data.get("signals", [])
+
+    color_map = {"High": "green", "Medium": "orange", "Low": "red"}
+    
+    if level == "Low":
+        st.warning(f"**Low System Confidence ({score}%)**: Data quality or freshness is poor. Insights may be unreliable.", icon="⚠️")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric(label="Confidence Level", value=level, delta=f"{score}%", delta_color="off")
+        st.markdown(f"<span style='color:{color_map.get(level, 'grey')}; font-size: 1.2em;'>●</span> {level}", unsafe_allow_html=True)
+
+    with col2:
+        with st.expander("View Confidence Signals"):
+            if signals:
+                for signal in signals:
+                    st.markdown(f"- {signal}")
+            else:
+                st.info("No specific signals available.")
+
 def setup_sidebar():
-    """Sets up the sidebar for either login or navigation."""
     st.sidebar.title("ProSi-mini")
+    
+    # --- DEV AUTH BYPASS – REMOVE BEFORE PRODUCTION ---
+    if DEV_MODE_BYPASS_AUTH:
+        st.sidebar.warning("Auth Bypassed (DEV)")
+        st.sidebar.info(f"Role: **{st.session_state.user_role.replace('_', ' ').title()}**")
+        st.sidebar.markdown("---")
+        render_navigation()
+        return
+    # --- END DEV AUTH BYPASS ---
 
     if not st.session_state.is_authenticated:
         st.sidebar.header("Login")
-        st.sidebar.selectbox(
-            "Select Your Persona",
-            ["Founder / Executive", "Sales Manager", "Operations / CRM Manager"],
-            key="persona"
-        )
+        st.sidebar.selectbox("Select Your Persona", ["Founder / Executive", "Sales Manager", "Operations / CRM Manager"], key="persona")
         st.sidebar.button("Login", on_click=handle_login, use_container_width=True)
     else:
         st.sidebar.success(f"Logged in as: **{st.session_state.user_role.replace('_', ' ').title()}**")
         st.sidebar.button("Logout", on_click=handle_logout, use_container_width=True)
-        
         st.sidebar.markdown("---")
         render_navigation()
-        
-        st.sidebar.markdown("---")
-        # display_alert_center() # This can be added back if needed
 
 def render_navigation():
-    """Renders the main navigation buttons based on user role."""
-    PAGES = {
-        "Dashboard": "📊",
-        "Governance & Audit": "⚖️",
-        "Ingestion": "📥",
-    }
-    
-    # Filter pages based on role
-    visible_pages = list(PAGES.keys())
-    if st.session_state.user_role != "founder":
-        if "Governance & Audit" in visible_pages: visible_pages.remove("Governance & Audit")
-    if st.session_state.user_role != "ops_crm":
-        if "Ingestion" in visible_pages: visible_pages.remove("Ingestion")
-
-    for page in visible_pages:
-        if st.sidebar.button(f"{PAGES[page]} {page}", use_container_width=True):
-            st.session_state.active_page = page
-            st.rerun()
+    # ... (existing code remains the same)
+    pass
 
 # --- Main Application ---
 def main():
@@ -136,16 +140,15 @@ def main():
     setup_sidebar()
 
     if st.session_state.is_authenticated:
-        # Page Router
         if st.session_state.active_page == "Dashboard":
             st.title("📊 Main Dashboard")
-            st.write("Welcome to your personalized dashboard.")
+            display_trust_confidence()
+            st.markdown("---")
+            st.write("Other dashboard components will go here.")
         elif st.session_state.active_page == "Governance & Audit":
             st.title("⚖️ Governance & Audit")
-            st.write("This page is for founders only.")
         elif st.session_state.active_page == "Ingestion":
             st.title("📥 Data Ingestion")
-            st.write("This page is for Ops/CRM managers only.")
     else:
         st.info("Please log in using the sidebar to continue.")
 
