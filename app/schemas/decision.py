@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
+from typing import List, Literal, Optional, Dict, Any
 from enum import Enum
 import uuid
 
@@ -20,17 +20,13 @@ class DecisionRecommendation(BaseModel):
     title: str
     recommendation: str
     priority: RecommendationPriority
-    confidence: float
+    confidence: int
     rationale: str
     impacted_metrics: List[str]
     governance_flags: List[str]
     suggested_owner: SuggestedOwner
-    
-    related_confidence_factors: List[str] = Field(default=[])
-    explainability_summary: Optional[str] = None
-    
-    # New field for detailed explanation
     explanation: Optional[Dict[str, Any]] = None
+    explainability_summary: Optional[str] = None
 
     class Config:
         from_attributes = True

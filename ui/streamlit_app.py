@@ -94,15 +94,15 @@ def load_dashboard_data():
         st.session_state.dashboard_loaded = True
 
 def render_recommendations(recommendations):
-    st.header("Recommended Actions")
+    st.header("🧠 Decision Recommendations")
     if not recommendations:
-        st.info("✅ No critical actions needed at this time.")
+        st.success("✅ No critical decisions needed.")
         return
 
     for rec in recommendations:
         with st.container(border=True):
             st.markdown(f"**{rec['title']}**")
-            st.caption(f"Confidence: {rec['confidence']}% | Suggested Owner: {rec['suggested_owner']}")
+            st.caption(f"Priority: **{rec['priority']}** | Confidence: **{rec['confidence']}%** | Owner: **{rec['suggested_owner']}**")
             st.write(rec['recommendation'])
 
             if rec.get('overridden'):
@@ -130,13 +130,42 @@ def render_recommendations(recommendations):
                                 st.rerun()
                             else:
                                 st.error("Failed to process override.")
+            
+            # Explainability Section
+            if rec.get('explanation'):
+                with st.expander("Why am I seeing this?"):
+                    st.markdown(f"**Summary:** {rec['explanation'].get('summary')}")
+                    if rec['explanation'].get('contributing_factors'):
+                        st.markdown("**Contributing Factors:**")
+                        for factor in rec['explanation']['contributing_factors']:
+                            st.markdown(f"- {factor}")
 
 def render_trust_confidence(confidence_data):
     st.header("Trust & Confidence")
     if not confidence_data:
         st.warning("Confidence data unavailable.")
         return
-    # ... (rest of rendering logic)
+
+    level = confidence_data.get("level", "Unknown")
+    score = confidence_data.get("score", 0)
+    guidance = confidence_data.get("decision_guidance", "Guidance unavailable.")
+    icon_map = {"HIGH": "✅", "MEDIUM": "⚠️", "LOW": "⛔️"}
+    
+    st.metric(label="Confidence Level", value=level, delta=f"{score}%", delta_color="off")
+    st.write(f"**{icon_map.get(level, '⚪️')} {guidance}**")
+
+    with st.expander("Why am I seeing this?"):
+        summary = confidence_data.get("explanation_summary")
+        details = confidence_data.get("explanation_details", [])
+        if summary:
+            st.markdown(f"**Summary:** {summary}")
+            if details:
+                st.markdown("---")
+                st.markdown("**Key Drivers:**")
+                for bullet in details:
+                    st.markdown(f"- {bullet}")
+        else:
+            st.info("Detailed explanation is currently unavailable.")
 
 def render_navigation():
     PAGES = {"Dashboard": "📊"}
@@ -193,6 +222,11 @@ def main():
         render_recommendations(st.session_state.recommendations_data)
         st.markdown("---")
         render_trust_confidence(st.session_state.confidence_data)
+        st.markdown("---")
+        if st.session_state.user_role in ["founder", "ops_crm"]:
+            # Placeholder for What-If Simulator (D5.3)
+            st.header("🔮 What-If Scenario Simulator")
+            st.info("Coming in Phase D5.3", icon="🏗️")
 
     elif st.session_state.active_page == "Governance & Audit":
         st.title("⚖️ Governance & Audit")
