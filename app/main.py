@@ -2,9 +2,11 @@ from fastapi import FastAPI, Request, Depends
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import OperationalError
 from contextlib import asynccontextmanager
+import logging
 
-from app.api.v1 import lead, followup, listing, analytics, governance, ingestion, system, health, alerts, auth
+from app.api.v1 import lead, followup, listing, analytics, governance, ingestion, system, health, alerts, auth, decisions, simulation
 from app.core.database import engine, Base, get_db
 from app.services.audit_log_service import create_audit_log_entry
 from app.schemas.audit_log import AuditLogCreate
@@ -15,12 +17,17 @@ Base.metadata.create_all(bind=engine)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Startup logic
     db = next(get_db())
     try:
+        # This will fail if the schema is out of date, but we will catch it.
         evaluate_decision_sla(db)
+    except OperationalError:
+        logging.warning("Could not evaluate SLAs on startup. This may be due to an outdated database schema.")
     finally:
         db.close()
     yield
+    # Shutdown logic can go here
 
 app = FastAPI(
     title="ProSi-mini API",
@@ -48,8 +55,10 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception):
+    logging.error(f"Unhandled exception: {exc}", exc_info=True)
     return JSONResponse(status_code=500, content={"detail": "An internal server error occurred."})
 
+# Register all API routers
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(lead.router, prefix="/api/v1")
 app.include_router(followup.router, prefix="/api/v1")
@@ -60,6 +69,8 @@ app.include_router(ingestion.router, prefix="/api/v1")
 app.include_router(system.router, prefix="/api/v1")
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(alerts.router, prefix="/api/v1")
+app.include_router(decisions.router, prefix="/api/v1")
+app.include_router(simulation.router, prefix="/api/v1")
 
 @app.get("/", tags=["Root"])
 def read_root():

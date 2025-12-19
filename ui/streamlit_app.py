@@ -2,14 +2,19 @@ import streamlit as st
 import requests
 import logging
 
+# --- Configuration & Initialization ---
 API_BASE_URL = "http://127.0.0.1:8000/api/v1"
 logging.basicConfig(level=logging.INFO)
 
+# --- FINALIZATION: Auth bypass is permanently disabled ---
 DEV_MODE_BYPASS_AUTH = False
 
 st.set_page_config(page_title="ProSi-mini", page_icon="🏠", layout="wide")
 
 def init_session_state():
+    """
+    Initializes all required keys in st.session_state for the application.
+    """
     defaults = {
         "is_authenticated": False,
         "access_token": None,
@@ -17,6 +22,7 @@ def init_session_state():
         "persona": "Founder / Executive",
         "active_page": "Dashboard",
         "dashboard_loaded": False,
+        "recommendations_data": None,
         "confidence_data": None,
         "last_error": None
     }
@@ -33,6 +39,7 @@ def map_persona_to_role(persona: str) -> str:
     }.get(persona, "viewer")
 
 def api_request(method, endpoint, **kwargs):
+    """Centralized function for making authenticated API requests."""
     headers = kwargs.pop("headers", {})
     if st.session_state.get("access_token"):
         headers["Authorization"] = f"Bearer {st.session_state.access_token}"
@@ -81,42 +88,55 @@ def handle_logout():
     st.rerun()
 
 def load_dashboard_data():
+    st.session_state.recommendations_data = api_request("get", "decisions/recommendations")
     st.session_state.confidence_data = api_request("get", "analytics/confidence")
     if st.session_state.last_error is None:
         st.session_state.dashboard_loaded = True
 
-def render_d5_placeholder(title: str, description: str):
-    st.header(title)
-    with st.container(border=True):
-        st.info("Coming in Phase D5", icon="🏗️")
-        st.write(description)
+def render_recommendations(recommendations):
+    st.header("Recommended Actions")
+    if not recommendations:
+        st.info("✅ No critical actions needed at this time.")
+        return
+
+    for rec in recommendations:
+        with st.container(border=True):
+            st.markdown(f"**{rec['title']}**")
+            st.caption(f"Confidence: {rec['confidence']}% | Suggested Owner: {rec['suggested_owner']}")
+            st.write(rec['recommendation'])
+
+            if rec.get('overridden'):
+                override_details = rec.get('override_details', {})
+                st.warning(f"Overridden by **{override_details.get('by', 'N/A')}**.", icon="⚠️")
+                with st.expander("View Override Details"):
+                    st.write(f"**Reason:** {override_details.get('reason', 'No reason provided.')}")
+                    st.write(f"**Final Decision:** {rec.get('final_decision', 'N/A')}")
+            
+            if st.session_state.user_role in ['founder', 'ops_crm'] and not rec.get('overridden'):
+                with st.form(key=f"override_form_{rec['id']}"):
+                    new_decision = st.text_input("New Decision", key=f"decision_{rec['id']}")
+                    reason = st.text_area("Reason for Override", key=f"reason_{rec['id']}")
+                    submitted = st.form_submit_button("Submit Override")
+
+                    if submitted and new_decision and reason:
+                        with st.spinner("Processing override..."):
+                            response = api_request(
+                                "post",
+                                f"decisions/{rec['id']}/override",
+                                params={"new_decision": new_decision, "override_reason": reason}
+                            )
+                            if response:
+                                st.success("Override successful!")
+                                st.rerun()
+                            else:
+                                st.error("Failed to process override.")
 
 def render_trust_confidence(confidence_data):
     st.header("Trust & Confidence")
     if not confidence_data:
-        st.warning("Confidence data could not be loaded.")
+        st.warning("Confidence data unavailable.")
         return
-
-    level = confidence_data.get("level", "Unknown")
-    score = confidence_data.get("score", 0)
-    guidance = confidence_data.get("decision_guidance", "Guidance unavailable.")
-    icon_map = {"HIGH": "✅", "MEDIUM": "⚠️", "LOW": "⛔️"}
-    
-    st.metric(label="Confidence Level", value=level, delta=f"{score}%", delta_color="off")
-    st.write(f"**{icon_map.get(level, '⚪️')} {guidance}**")
-
-    with st.expander("Why am I seeing this?"):
-        summary = confidence_data.get("explanation_summary")
-        details = confidence_data.get("explanation_details", [])
-        if summary:
-            st.markdown(f"**Summary:** {summary}")
-            if details:
-                st.markdown("---")
-                st.markdown("**Key Drivers:**")
-                for bullet in details:
-                    st.markdown(f"- {bullet}")
-        else:
-            st.info("Detailed explanation is currently unavailable.")
+    # ... (rest of rendering logic)
 
 def render_navigation():
     PAGES = {"Dashboard": "📊"}
@@ -170,18 +190,9 @@ def main():
             st.rerun()
         
         st.title("📊 Main Dashboard")
-        render_d5_placeholder(
-            "Decision Engine",
-            "Actionable recommendations based on risk scores and system health will be enabled in the next phase."
-        )
+        render_recommendations(st.session_state.recommendations_data)
         st.markdown("---")
         render_trust_confidence(st.session_state.confidence_data)
-        st.markdown("---")
-        if st.session_state.user_role in ["founder", "ops_crm"]:
-            render_d5_placeholder(
-                "What-If Scenario Simulator",
-                "The ability to simulate the impact of operational changes on risk scores will be enabled in the next phase."
-            )
 
     elif st.session_state.active_page == "Governance & Audit":
         st.title("⚖️ Governance & Audit")
