@@ -1,93 +1,103 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 from app.schemas.decision import DecisionRecommendation, RecommendationPriority, SuggestedOwner
+from app.schemas.rule_result import RuleResult
 from app.core.security import UserRole
 
-def calculate_risk_score(metrics: dict) -> int:
-    """
-    Output: 0–100 risk score
-    """
-    weights = {
-        "lead_conversion_rate": 0.30,
-        "whatsapp_response_rate": 0.25,
-        "data_completeness": 0.20,
-        "avg_response_time": 0.15,
-        "duplicate_rate": 0.10
+def check_confidence_threshold(confidence_score: float) -> RuleResult:
+    passed = confidence_score >= 60
+    return RuleResult(
+        rule_id="CONFIDENCE_CHECK",
+        passed=passed,
+        weight=0.5,
+        explanation=f"System confidence score is {confidence_score}%, which is {'above' if passed else 'below'} the 60% minimum threshold."
+    )
+
+def check_policy_violation(metrics: Dict[str, Any]) -> RuleResult:
+    # Dummy logic for policy violation
+    violation = metrics.get("duplicate_rate", 0) > 5
+    return RuleResult(
+        rule_id="POLICY_VIOLATION_CHECK",
+        passed=not violation,
+        weight=0.3,
+        explanation=f"Data duplication rate is {metrics.get('duplicate_rate', 0)}%, which {'does not violate' if not violation else 'violates'} the 5% policy."
+    )
+
+def check_data_completeness(metrics: Dict[str, Any]) -> RuleResult:
+    passed = metrics.get("data_completeness", 0) >= 70
+    return RuleResult(
+        rule_id="COMPLETENESS_CHECK",
+        passed=passed,
+        weight=0.2,
+        explanation=f"Data completeness is {metrics.get('data_completeness', 0)}%, which is {'above' if passed else 'below'} the 70% minimum threshold."
+    )
+
+def explain_decision(decision: DecisionRecommendation, rule_results: List[RuleResult]) -> Dict[str, Any]:
+    passed_rules = [r for r in rule_results if r.passed]
+    failed_rules = [r for r in rule_results if not r.passed]
+
+    if not failed_rules:
+        summary = f"Recommendation '{decision.title}' is fully supported by all system checks."
+    else:
+        summary = f"Recommendation '{decision.title}' is generated despite {len(failed_rules)} warning(s)."
+
+    contributing_factors = [r.explanation for r in passed_rules]
+    triggered_rule_ids = [r.rule_id for r in rule_results]
+
+    return {
+        "summary": summary,
+        "contributing_factors": contributing_factors,
+        "triggered_rule_ids": triggered_rule_ids
     }
 
-    normalized = {
-        "lead_conversion_rate": max(0, 100 - (metrics.get("lead_conversion_rate", 0) * 10)),
-        "whatsapp_response_rate": max(0, 100 - metrics.get("whatsapp_response_rate", 0)),
-        "data_completeness": max(0, 100 - metrics.get("data_completeness", 0)),
-        "avg_response_time": min(100, metrics.get("avg_response_time", 0) / 2),
-        "duplicate_rate": min(100, metrics.get("duplicate_rate", 0) * 10)
-    }
-
-    score = sum(normalized[k] * w for k, w in weights.items())
-    return int(min(100, score))
-
-def generate_recommendations(risk_score: int, confidence: float, completeness: float) -> List[DecisionRecommendation]:
-    """
-    Generates recommendations based on a calculated risk score and other system metrics.
-    """
+def generate_recommendations(analytics_metrics: Dict[str, Any], confidence_score: float) -> List[DecisionRecommendation]:
     recommendations = []
-    governance_flags = []
-    if confidence < 60:
-        governance_flags.append("low_confidence")
-    if completeness < 70:
-        governance_flags.append("data_gap")
-
-    if risk_score >= 75:
-        recommendations.append(DecisionRecommendation(
-            title="CRITICAL: Address Data Duplication",
-            recommendation="High duplication rate detected. Run data cleaning scripts to merge duplicate leads and prevent skewed analytics.",
-            priority=RecommendationPriority.CRITICAL,
-            confidence=int(confidence),
-            rationale=f"Risk score is {risk_score}. The highest contributing factor is a high data duplication rate, which severely impacts trust.",
-            impacted_metrics=["Data Quality", "Lead Count"],
-            governance_flags=governance_flags,
-            suggested_owner=SuggestedOwner.OPS
-        ))
     
-    if risk_score >= 50:
-        recommendations.append(DecisionRecommendation(
-            title="HIGH: Improve Lead Response Time",
-            recommendation="Average lead response time is too high. Assign more resources to new leads or implement automated first-touch messages.",
-            priority=RecommendationPriority.HIGH,
-            confidence=int(confidence),
-            rationale=f"Risk score is {risk_score}. Slow response times are a major cause of lead churn and missed opportunities.",
-            impacted_metrics=["Time-to-Contact", "Conversion Rate"],
-            governance_flags=governance_flags,
-            suggested_owner=SuggestedOwner.SALES
-        ))
+    # Run all rules
+    rule_results = [
+        check_confidence_threshold(confidence_score),
+        check_policy_violation(analytics_metrics),
+        check_data_completeness(analytics_metrics)
+    ]
 
-    if risk_score >= 30:
-        recommendations.append(DecisionRecommendation(
-            title="MEDIUM: Boost WhatsApp Engagement",
-            recommendation="WhatsApp response rates are below benchmark. A/B test new opening messages to improve engagement.",
+    # Example of a decision based on rule results
+    if all(r.passed for r in rule_results):
+        rec = DecisionRecommendation(
+            title="Proceed with Automated Outreach",
+            recommendation="All system checks passed. It is safe to proceed with automated marketing campaigns.",
             priority=RecommendationPriority.MEDIUM,
-            confidence=int(confidence),
-            rationale=f"Risk score is {risk_score}. Low engagement on a key channel indicates a need for process optimization.",
-            impacted_metrics=["Response Rate", "Channel Performance"],
-            governance_flags=governance_flags,
+            confidence=int(confidence_score),
+            rationale="High confidence and data quality allow for safe automation.",
+            impacted_metrics=["Lead Engagement", "Conversion Rate"],
             suggested_owner=SuggestedOwner.MARKETING
-        ))
+        )
+        explanation = explain_decision(rec, rule_results)
+        rec.explainability_summary = explanation["summary"]
+        # In a real system, you might attach more from the explanation object
+        recommendations.append(rec)
+
+    # Add a recommendation if a specific rule fails
+    if not check_data_completeness(analytics_metrics).passed:
+        rec = DecisionRecommendation(
+            title="Address Data Completeness",
+            recommendation="Data completeness is below the 70% threshold. Prioritize data enrichment activities.",
+            priority=RecommendationPriority.HIGH,
+            confidence=int(confidence_score),
+            rationale="Low data completeness reduces the effectiveness of sales and marketing efforts.",
+            impacted_metrics=["Data Quality", "Lead Conversion Rate"],
+            suggested_owner=SuggestedOwner.OPS
+        )
+        explanation = explain_decision(rec, rule_results)
+        rec.explainability_summary = explanation["summary"]
+        recommendations.append(rec)
 
     return recommendations
 
-def filter_recommendations_by_persona(
-    recommendations: List[DecisionRecommendation], 
-    persona: UserRole
-) -> List[DecisionRecommendation]:
-    """
-    Filters a list of recommendations based on the user's persona.
-    """
+def filter_recommendations_by_persona(recommendations: List[DecisionRecommendation], persona: UserRole) -> List[DecisionRecommendation]:
+    # ... (existing filtering logic remains the same)
     if persona == UserRole.FOUNDER:
         return [rec for rec in recommendations if rec.priority in [RecommendationPriority.CRITICAL, RecommendationPriority.HIGH]]
-    
     elif persona == UserRole.SALES_MANAGER:
         return [rec for rec in recommendations if rec.suggested_owner in [SuggestedOwner.SALES, SuggestedOwner.MARKETING]]
-        
     elif persona == UserRole.OPS_CRM:
         return [rec for rec in recommendations if rec.suggested_owner == SuggestedOwner.OPS]
-        
     return recommendations
