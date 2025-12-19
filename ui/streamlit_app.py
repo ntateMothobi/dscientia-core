@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 import logging
+import json
 
 # --- Configuration & Initialization ---
 API_BASE_URL = "http://127.0.0.1:8000/api/v1"
@@ -25,7 +26,8 @@ def init_session_state():
         "recommendations_data": None,
         "confidence_data": None,
         "simulation_result": None,
-        "learning_insights": None, # Added for D5.5
+        "learning_insights": None,
+        "pending_reviews": None, # Added for D5.6
         "last_error": None
     }
     for key, value in defaults.items():
@@ -92,7 +94,9 @@ def handle_logout():
 def load_dashboard_data():
     st.session_state.recommendations_data = api_request("get", "decisions/recommendations")
     st.session_state.confidence_data = api_request("get", "analytics/confidence")
-    st.session_state.learning_insights = api_request("get", "learning/insights") # Added for D5.5
+    st.session_state.learning_insights = api_request("get", "learning/insights")
+    if st.session_state.user_role in ["founder", "ops_crm"]:
+        st.session_state.pending_reviews = api_request("get", "learning/reviews/pending")
     if st.session_state.last_error is None:
         st.session_state.dashboard_loaded = True
 
@@ -187,25 +191,76 @@ def render_learning_insights(insights):
         st.info("No learning data available yet.")
         return
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         st.metric("Rejection Rate", f"{insights.get('rejection_rate', 0)}%")
         st.caption(f"Based on {insights.get('total_decisions', 0)} decisions")
 
     with col2:
-        drift = insights.get('confidence_drift', 'low')
-        color = "green" if drift == "low" else "orange" if drift == "medium" else "red"
-        st.markdown(f"**Confidence Drift:** :{color}[{drift.upper()}]")
-        st.caption("Drift based on rejection frequency")
+        st.metric("Override Frequency", f"{insights.get('override_frequency', 0)}%")
 
     with col3:
-        bias = insights.get('persona_bias_detected', False)
-        if bias:
+        # Simple drift logic for display
+        rr = insights.get('rejection_rate', 0)
+        drift = "LOW" if rr < 20 else "MEDIUM" if rr < 50 else "HIGH"
+        color = "green" if drift == "LOW" else "orange" if drift == "MEDIUM" else "red"
+        st.markdown(f"**Confidence Drift:** :{color}[{drift}]")
+        st.caption("Drift based on rejection frequency")
+
+    with col4:
+        # Check for bias
+        bias_map = insights.get('approval_rate_by_persona', {})
+        # Simple heuristic: if any persona has < 35% approval (meaning > 65% rejection/override)
+        biased = [p for p, rate in bias_map.items() if rate < 35]
+        if biased:
             st.error("⚠️ Persona Bias Detected!")
-            st.write(f"Biased Personas: {', '.join(insights.get('biased_personas', []))}")
+            st.caption(f"Potential bias against: {', '.join(biased)}")
         else:
             st.success("✅ No Persona Bias Detected")
+
+def render_learning_reviews(reviews):
+    """
+    Renders the D5.6 Learning Review Panel.
+    """
+    st.header("🧐 Learning Review & Approval")
+    
+    if st.button("Generate New Review Proposal", use_container_width=True):
+        with st.spinner("Generating proposal..."):
+            api_request("post", "learning/review/generate")
+            st.rerun()
+
+    if not reviews:
+        st.info("No pending learning reviews.")
+        return
+
+    for review in reviews:
+        with st.container(border=True):
+            st.subheader(f"{review['insight_type']} (ID: {review['id']})")
+            st.write(review['summary'])
+            
+            with st.expander("View Metrics Snapshot"):
+                st.json(review['metrics'])
+            
+            with st.form(key=f"review_form_{review['id']}"):
+                notes = st.text_area("Reviewer Notes", placeholder="Enter justification for approval/rejection...")
+                col1, col2 = st.columns(2)
+                with col1:
+                    approve = st.form_submit_button("✅ Approve Insights", use_container_width=True)
+                with col2:
+                    reject = st.form_submit_button("❌ Reject Insights", use_container_width=True)
+                
+                if approve:
+                    with st.spinner("Approving..."):
+                        api_request("post", f"learning/review/{review['id']}/approve", params={"notes": notes})
+                        st.success("Review Approved!")
+                        st.rerun()
+                
+                if reject:
+                    with st.spinner("Rejecting..."):
+                        api_request("post", f"learning/review/{review['id']}/reject", params={"notes": notes})
+                        st.warning("Review Rejected!")
+                        st.rerun()
 
 def render_trust_confidence(confidence_data):
     st.header("Trust & Confidence")
@@ -277,6 +332,7 @@ def render_navigation():
     PAGES = {"Dashboard": "📊"}
     if st.session_state.user_role in ["founder", "ops_crm"]:
         PAGES["Governance & Audit"] = "⚖️"
+        PAGES["Learning Review"] = "🧐" # Added for D5.6
     if st.session_state.user_role == "ops_crm":
         PAGES["Ingestion"] = "📥"
 
@@ -327,12 +383,19 @@ def main():
         st.title("📊 Main Dashboard")
         render_recommendations(st.session_state.recommendations_data)
         st.markdown("---")
-        render_learning_insights(st.session_state.learning_insights) # Added for D5.5
+        render_learning_insights(st.session_state.learning_insights)
         st.markdown("---")
         render_trust_confidence(st.session_state.confidence_data)
         st.markdown("---")
         if st.session_state.user_role in ["founder", "ops_crm"]:
              render_scenario_simulator()
+
+    elif st.session_state.active_page == "Learning Review":
+        if not st.session_state.dashboard_loaded:
+             with st.spinner("Loading reviews..."):
+                 load_dashboard_data()
+             st.rerun()
+        render_learning_reviews(st.session_state.pending_reviews)
 
     elif st.session_state.active_page == "Governance & Audit":
         st.title("⚖️ Governance & Audit")

@@ -13,6 +13,9 @@ from app.schemas.audit_log import AuditLogCreate
 from app.core.security import get_current_user, UserContext
 from app.services.decision_sla_service import evaluate_decision_sla
 
+# Ensure all models are imported before creating tables
+from app.models import learning_review
+
 Base.metadata.create_all(bind=engine)
 
 @asynccontextmanager
