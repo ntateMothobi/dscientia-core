@@ -10,7 +10,7 @@ logging.basicConfig(level=logging.INFO)
 # --- FINALIZATION: Auth bypass is permanently disabled ---
 DEV_MODE_BYPASS_AUTH = False
 
-st.set_page_config(page_title="ProSi-mini", page_icon="🏠", layout="wide")
+st.set_page_config(page_title="DscienTia Core", page_icon="🧠", layout="wide")
 
 def init_session_state():
     """
@@ -344,7 +344,9 @@ def render_navigation():
             st.rerun()
 
 def setup_sidebar():
-    st.sidebar.title("ProSi-mini")
+    st.sidebar.title("DscienTia Core")
+    st.sidebar.caption("Decision Intelligence Core Platform")
+    st.sidebar.caption("Property Sales as First Vertical")
     if st.session_state.is_authenticated:
         st.sidebar.success(f"Logged in as: **{st.session_state.user_role.replace('_', ' ').title()}**")
         st.sidebar.button("Logout", on_click=handle_logout, use_container_width=True)
@@ -380,7 +382,8 @@ def main():
                 load_dashboard_data()
             st.rerun()
         
-        st.title("📊 Main Dashboard")
+        st.title("🧠 DscienTia Core")
+        st.caption("Decision Intelligence Core Platform · Property Sales as First Vertical")
         render_recommendations(st.session_state.recommendations_data)
         st.markdown("---")
         render_learning_insights(st.session_state.learning_insights)

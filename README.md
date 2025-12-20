@@ -1,4 +1,7 @@
-# Property Sales Intelligence (Mini)
+# 🧠 DscienTia Core
+
+DscienTia Core is a modular, governance-first decision intelligence engine.
+Property Sales is implemented as the first vertical.
 
 Property Sales Intelligence (Mini) is a modular backend MVP built with FastAPI
 to manage leads and follow-ups in property sales workflows.

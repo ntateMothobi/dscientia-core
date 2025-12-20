@@ -33,8 +33,8 @@ async def lifespan(app: FastAPI):
     # Shutdown logic can go here
 
 app = FastAPI(
-    title="ProSi-mini API",
-    description="A mini Property Sales Intelligence system.",
+    title="DscienTia Core",
+    description="Decision Intelligence Core Platform (Property Sales as First Vertical)",
     version="0.4.0",
     lifespan=lifespan
 )
